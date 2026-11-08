@@ -1303,6 +1303,7 @@ struct CaptureDmaBuf {
 
 bool CaptureGL::make_current()
 {
+    swell_wayland_clear_gl_context();
     gdk_gl_context_make_current(context);
     if (gdk_gl_context_get_current() != context || eglGetCurrentDisplay() == EGL_NO_DISPLAY) return false;
     return target == EGL_NO_SURFACE || eglMakeCurrent(display, target, target, eglGetCurrentContext());
@@ -3567,6 +3568,16 @@ static void detach_bridge_widgets(GtkWidget *widget)
         GList *children = gtk_container_get_children(GTK_CONTAINER(widget));
         for (GList *p = children; p; p = p->next) detach_bridge_widgets(GTK_WIDGET(p->data));
         g_list_free(children);
+    }
+}
+
+void xw_bridge_attach_children(HWND hwnd)
+{
+    for (HWND child = hwnd->m_children; child; child = child->m_next) {
+        if (child->m_oswidget && G_TYPE_CHECK_INSTANCE_TYPE(child->m_oswidget, xw_view_get_type()))
+            xw_size(child);
+        else
+            xw_bridge_attach_children(child);
     }
 }
 

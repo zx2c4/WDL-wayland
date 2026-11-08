@@ -4,6 +4,7 @@
 #include "swell.h"
 
 void init_private_xwayland();
+void xw_bridge_attach_children(HWND hwnd);
 void xw_bridge_detach_children(HWND hwnd);
 HWND xw_bridge_create(
     HWND viewpar,

@@ -30,6 +30,7 @@ struct SWELL_GdkBackend
   const char *(*window_manager_name)();
   bool (*create_window)(HWND hwnd, GdkWindow *transient_for);
   void (*show_window)(HWND hwnd, bool raise, bool modal, guint32 user_time);
+  void (*map_window)(HWND hwnd, bool raise);
   void (*hide_window)(HWND hwnd);
   void (*destroy_window)(HWND hwnd);
   bool (*close_window)(HWND hwnd);
@@ -56,6 +57,10 @@ struct SWELL_GdkBackend
 
 extern const SWELL_GdkBackend swell_gdk_x11;
 void swell_x11_init();
+#ifdef SWELL_TARGET_WAYLAND
+extern const SWELL_GdkBackend swell_gdk_wayland;
+bool swell_wayland_init_display();
+#endif
 extern const SWELL_GdkBackend *swell_gdk_backend;
 extern GdkEvent *swell_gdk_current_event;
 extern HWND swell_gdk_drag_source;

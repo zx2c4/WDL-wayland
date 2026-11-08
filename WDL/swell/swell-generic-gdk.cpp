@@ -287,7 +287,7 @@ bool swell_gdk_size_hints(HWND hwnd, const RECT *fixed, GdkGeometry *hints)
 
 void swell_recalcMinMaxInfo(HWND hwnd)
 {
-  if (hwnd && hwnd->m_oswindow && (hwnd->m_style & WS_CAPTION))
+  if (hwnd && hwnd->m_oswindow && (hwnd->m_style & (WS_CAPTION | WS_THICKFRAME)))
     swell_gdk_backend->set_size_hints(hwnd, NULL);
 }
 
@@ -372,11 +372,22 @@ void SWELL_initargs(int *argc, char ***argv)
     *(void **)&_gdk_set_allowed_backends = dlsym(RTLD_DEFAULT,"gdk_set_allowed_backends");
 
     if (_gdk_set_allowed_backends)
+#ifdef SWELL_TARGET_WAYLAND
+      _gdk_set_allowed_backends("wayland,x11");
+#else
       _gdk_set_allowed_backends("x11");
+#endif
+#endif
+
+#ifdef SWELL_SUPPORT_GTK
+    dlopen("libgdk-3.so.0", RTLD_NOW | RTLD_GLOBAL);
 #endif
 
     if (!SWELL_gdk_active)
       SWELL_gdk_active = gdk_init_check(argc,argv) ? 1 : -1;
+#ifdef SWELL_TARGET_WAYLAND
+    if (SWELL_gdk_active > 0 && !swell_wayland_init_display()) SWELL_gdk_active = -1;
+#endif
     if (SWELL_gdk_active > 0)
     {
       char buf[1024];
@@ -518,6 +529,9 @@ static void init_options()
     const char *wayland_display = getenv("WAYLAND_DISPLAY");
     if (wayland_display && *wayland_display) gdk_options |= OPTION_IS_WAYLAND;
 
+#ifdef SWELL_TARGET_WAYLAND
+    if (swell_is_wayland()) gdk_options |= OPTION_IS_WAYLAND;
+#endif
 
     if (swell_gdk_option("gdk_owned_windows_keep_above", "auto (default is 1)",1))
       gdk_options|=OPTION_KEEP_OWNED_ABOVE;
@@ -600,7 +614,8 @@ static void swell_set_owned_windows_transient(HWND hwnd, bool do_create)
     {
       SWELL_OSWINDOW r = (SWELL_OSWINDOW)raiselist.Get(x);
       gdk_window_set_transient_for(r,hwnd->m_oswindow);
-      gdk_window_show_unraised(r);
+      HWND owned = swell_oswindow_to_hwnd(r);
+      if (owned) swell_gdk_backend->map_window(owned, false);
     }
   }
 }
@@ -743,13 +758,16 @@ void swell_oswindow_manage(HWND hwnd, bool wantfocus)
 
 void swell_oswindow_maximize(HWND hwnd, bool wantmax) // false=restore
 {
-  if (WDL_NORMALLY(hwnd && hwnd->m_oswindow))
+  if (WDL_NOT_NORMALLY(!hwnd)) return;
+  if (!hwnd->m_oswindow)
   {
-    if (wantmax)
-      gdk_window_maximize(hwnd->m_oswindow);
-    else
-      gdk_window_unmaximize(hwnd->m_oswindow);
+    hwnd->m_is_maximized = wantmax;
+    return;
   }
+  if (wantmax)
+    gdk_window_maximize(hwnd->m_oswindow);
+  else
+    gdk_window_unmaximize(hwnd->m_oswindow);
 }
 
 #if SWELL_TARGET_GDK == 2
@@ -1834,7 +1852,7 @@ void swell_oswindow_postresize(HWND hwnd, RECT f)
 { 
   if (hwnd->m_oswindow && (hwnd->m_oswindow_private&PRIVATE_NEEDSHOW) && !hwnd->m_oswindow_fullscreen)
   {
-    gdk_window_show(hwnd->m_oswindow);
+    swell_gdk_backend->map_window(hwnd, true);
     if (hwnd->m_style & WS_CAPTION) gdk_window_unmaximize(hwnd->m_oswindow); // fixes Kwin
     swell_oswindow_resize(hwnd->m_oswindow,3,f); // fixes xfce
     hwnd->m_oswindow_private &= ~PRIVATE_NEEDSHOW;

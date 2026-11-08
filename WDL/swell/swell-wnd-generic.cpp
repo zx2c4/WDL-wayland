@@ -41,6 +41,9 @@
 #include "../wdlutf8.h"
 
 #include "swell-dlggen.h"
+#ifdef SWELL_TARGET_WAYLAND
+#include "swell-wayland.h"
+#endif
 
 #define EDIT_CURSOR_BLINK_LEN 500
 #define EDIT_CURSOR_CYCLE_INTERVAL 3
@@ -7858,6 +7861,13 @@ LRESULT DefWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             swell_ime_context = swell_gtk_im_multicontext_new();
             if (swell_ime_context)
             {
+#ifdef SWELL_TARGET_WAYLAND
+              if (swell_is_wayland())
+              {
+                swell_gtk_im_context_set_client_window(swell_ime_context, NULL);
+                gdk_display_sync(gdk_display_get_default());
+              }
+#endif
               g_signal_connect(swell_ime_context, "commit", G_CALLBACK(ime_commit_cb), NULL);
               g_signal_connect(swell_ime_context, "preedit-changed", G_CALLBACK(ime_preedit_changed_cb), NULL);
               g_signal_connect(swell_ime_context, "preedit-end", G_CALLBACK(ime_preedit_end_cb), NULL);
@@ -9101,6 +9111,9 @@ void swell_im_update_candidates_location()
     ReleaseDC(hwnd, hdc);
   }
   GdkRectangle preedit_area = {x, y, 0, 0};
+#ifdef SWELL_TARGET_WAYLAND
+  if (swell_is_wayland()) swell_wayland_ime_cursor_rect(client_hwnd, &preedit_area);
+#endif
   swell_gtk_im_context_set_cursor_location(swell_ime_context, &preedit_area);
 }
 

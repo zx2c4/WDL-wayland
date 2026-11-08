@@ -1566,6 +1566,12 @@ static void show_window(HWND hwnd, bool raise, bool modal, guint32 user_time)
   if (s_last_desktop > 0) swell_x11_move_to_desktop(hwnd->m_oswindow, s_last_desktop - 1);
 }
 
+static void map_window(HWND hwnd, bool raise)
+{
+  if (raise) gdk_window_show(hwnd->m_oswindow);
+  else gdk_window_show_unraised(hwnd->m_oswindow);
+}
+
 static void hide_window(HWND hwnd)
 {
   gdk_window_hide(hwnd->m_oswindow);
@@ -1799,7 +1805,7 @@ static void drag_files(HWND hwnd, const SWELL_GdkDrag &data)
 const SWELL_GdkBackend swell_gdk_x11 = {
   event_handler, mouse_event, run_events, get_cursor_pos, swell_gdk_get_async_key_state,
   update_window, invalidate, get_window_rect, resize_window, set_size_hints,
-  activate, window_manager_name, create_window, show_window, hide_window, destroy_window,
+  activate, window_manager_name, create_window, show_window, map_window, hide_window, destroy_window,
   close_window, focus_window, swell_gdk_set_decorations, set_cursor, swell_x11_create_bridge, NULL, false,
   NULL, swell_gdk_monitor_geometry, scaling_init,
   NULL, read_clipboard, claim_clipboard, NULL, NULL, drag_files,

@@ -125,7 +125,7 @@ void EndDialog(HWND wnd, int ret)
     void RecurseDestroyWindow(HWND);
     SendMessage(wnd,WM_DESTROY,0,0);
     #ifndef SWELL_NO_SPARE_MODALDLG
-      if (wnd->m_oswindow && wnd->m_visible)
+      if (wnd->m_oswindow && wnd->m_visible && swell_oswindow_reuse_popup())
       {
         swell_dlg_destroyspare();
         s_spare_rect = wnd->m_position;
