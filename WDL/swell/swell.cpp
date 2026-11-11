@@ -1212,7 +1212,7 @@ void *SWELL_ExtendedAPI(const char *key, void *v)
     swell_oswindow_prevent_screensaver(key[0] != '-', (const char *) v);
   }
 #endif
-#ifdef SWELL_SUPPORT_GTK
+#if defined(SWELL_SUPPORT_GTK) || defined(SWELL_TARGET_WAYLAND)
   else if (!strcmp(key,"LOAD_GTK"))
   {
     return SWELL_load_gtk() ? (void*)"OK": NULL;

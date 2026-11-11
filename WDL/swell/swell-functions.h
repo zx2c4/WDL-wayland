@@ -994,9 +994,7 @@ SWELL_API_DEFINE(HDC, GetDC,(HWND)) // use these sparingly! they kinda work but 
 SWELL_API_DEFINE(HDC, GetWindowDC,(HWND)) 
 SWELL_API_DEFINE(void, ReleaseDC,(HWND, HDC))
 
-#ifdef SWELL_TARGET_OSX
 SWELL_API_DEFINE(void, SWELL_FlushWindow,(HWND))
-#endif
             
 SWELL_API_DEFINE(void, SWELL_FillDialogBackground,(HDC hdc, const RECT *r, int level))
 
@@ -1067,7 +1065,7 @@ SWELL_API_DEFINE(void,GetTempPath,(int sz, char *buf))
 SWELL_API_DEFINE(void,SWELL_initargs,(int *argc, char ***argv))
 SWELL_API_DEFINE(void,SWELL_RunMessageLoop,())
 SWELL_API_DEFINE(HWND,SWELL_CreateXBridgeWindow,(HWND viewpar, void **wref, const RECT*))
-SWELL_API_DEFINE(void*,SWELL_GetOSWindow,(HWND hwnd, const char *type)) // type should be "GdkWindow"
+SWELL_API_DEFINE(void*,SWELL_GetOSWindow,(HWND hwnd, const char *type)) // "GdkWindow", "wl_display", or "wl_surface"
 SWELL_API_DEFINE(void*,SWELL_GetOSEvent,(const char *type)) // type should be "GdkEvent"
 #endif
 

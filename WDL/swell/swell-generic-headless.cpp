@@ -110,7 +110,11 @@ void swell_oswindow_manage_gdk(HWND hwnd, bool wantfocus)
   if (wantVis) swell_oswindow_update_text_gdk(hwnd);
 }
 
+void swell_oswindow_begin_drag_gdk(HWND) { }
+bool swell_oswindow_from_point_gdk(POINT, HWND *) { return false; }
+bool swell_oswindow_can_reuse_gdk() { return true; }
 
+void swell_oswindow_end_modal_gdk(HWND) { }
 
 void SWELL_RunEvents_gdk()
 {
@@ -336,6 +340,7 @@ void *SWELL_GetOSWindow_gdk(HWND hwnd, const char *type) { return NULL; }
 void *SWELL_GetOSEvent_gdk(const char *type) { return NULL; }
 
 void SWELL_SetViewGL_gdk(HWND, char) { }
+void SWELL_FlushWindow_gdk(HWND) { }
 bool SWELL_GetViewGL_gdk(HWND) { return false; }
 bool SWELL_SetGLContextToView_gdk(HWND) { return false; }
 BOOL EnumDisplayMonitors_gdk(HDC, const LPRECT, MONITORENUMPROC, LPARAM) { return FALSE; }
