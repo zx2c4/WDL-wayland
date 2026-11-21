@@ -36,6 +36,9 @@
 
 
 #include "swell-internal.h"
+#ifdef SWELL_WAYLAND_VST3
+#include "swell-vst3-wayland.h"
+#endif
 #ifndef SWELL_TARGET_OSX
 #include "swell-platform.h"
 #endif
@@ -931,6 +934,14 @@ void *GetProcAddress(HINSTANCE hInst, const char *procName)
 #endif
   if (rec->instptr)  ret=(void *)dlsym(rec->instptr, procName);
   if (ret) rec->lastSymbolRequested=ret;
+#ifdef SWELL_WAYLAND_VST3
+  if (ret && !strcmp(procName, "GetPluginFactory") && swell_platform_is_wayland() &&
+      dlsym(rec->instptr, "ModuleEntry") && dlsym(rec->instptr, "ModuleExit"))
+  {
+    WDL_MutexLock lock(&s_libraryMutex);
+    return swell_vst3_factory(&rec->vst3_factory, ret);
+  }
+#endif
   return ret;
 }
 
@@ -965,6 +976,9 @@ BOOL FreeLibrary(HINSTANCE hInst)
   {
     CFRelease((CFBundleRef)rec->bundleinstptr);
   }
+#endif
+#ifdef SWELL_WAYLAND_VST3
+  if (dofree) swell_vst3_free_factory(rec->vst3_factory);
 #endif
   if (rec->instptr) dlclose(rec->instptr); 
   

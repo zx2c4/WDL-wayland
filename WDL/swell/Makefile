@@ -125,12 +125,18 @@ ifndef NOGDK
         cairo libdecor-0 epoxy egl xcb-keysyms xcb-randr xcb-damage \
         xcb-shape xcb-shm xcb-dri3 xcb-sync xcb-composite xcb-ewmh xcb-xtest \
         xcb-xfixes xcb-xkb xcb-image xcb-renderutil xcb-res libdrm
+      WAYLAND_PROTOCOLS := xdg-shell text-input-unstable-v3 xdg-activation-v1 xdg-toplevel-drag-v1 viewporter fractional-scale-v1 xdg-output-unstable-v1 cursor-shape-v1 pointer-warp-v1 tablet-unstable-v2
+      ifdef VST3_SDK
+        WAYLAND_PACKAGES += 'wayland-server >= 1.22' libffi
+        WAYLAND_PROTOCOLS += linux-dmabuf-v1 linux-drm-syncobj-v1
+        CFLAGS += -DSWELL_WAYLAND_VST3
+        SWELL_OBJS += swell-vst3-wayland.o swell-wayland-delegate.o
+      endif
       CFLAGS += -DSWELL_TARGET_WAYLAND $(shell $(PKG_CONFIG) --cflags $(WAYLAND_PACKAGES))
       LINKEXTRA += $(shell $(PKG_CONFIG) --libs $(WAYLAND_PACKAGES))
       SWELL_OBJS += swell-generic-wayland.o swell-xwayland-bridge.o
       WAYLAND_SCANNER ?= wayland-scanner
       WAYLAND_PROTOCOLS_DIR := $(shell $(PKG_CONFIG) --variable=pkgdatadir wayland-protocols)
-      WAYLAND_PROTOCOLS := xdg-shell text-input-unstable-v3 xdg-activation-v1 xdg-toplevel-drag-v1 viewporter fractional-scale-v1 xdg-output-unstable-v1 cursor-shape-v1 pointer-warp-v1 tablet-unstable-v2
       SWELL_OBJS += $(addsuffix -protocol.o,$(WAYLAND_PROTOCOLS))
     endif
     ifndef SWELL_GDK_ONLY
@@ -205,8 +211,14 @@ clean:
 ifdef WAYLAND
 ifndef NOGDK
 ifndef GDK2
-swell-generic-wayland.o swell-xwayland-bridge.o: CXXFLAGS += -std=c++17
-swell-generic-wayland.o swell-xwayland-bridge.o: $(SWELL_HEADERS) swell-wayland.h swell-xwayland-bridge.h $(addsuffix -client-protocol.h,$(WAYLAND_PROTOCOLS))
+ifdef VST3_SDK
+swell-vst3-wayland.o: CXXFLAGS += -isystem "$(VST3_SDK)"
+swell.o swell-generic-wayland.o swell-xwayland-bridge.o swell-vst3-wayland.o swell-wayland-delegate.o: swell-vst3-wayland.h
+endif
+swell-generic-wayland.o swell-xwayland-bridge.o swell-vst3-wayland.o swell-wayland-delegate.o: CXXFLAGS += -std=c++17
+swell-generic-wayland.o swell-xwayland-bridge.o swell-vst3-wayland.o swell-wayland-delegate.o: $(SWELL_HEADERS) swell-wayland.h swell-xwayland-bridge.h $(addsuffix -client-protocol.h,$(WAYLAND_PROTOCOLS))
+linux-dmabuf-v1-client-protocol.h linux-dmabuf-v1-protocol.c: $(WAYLAND_PROTOCOLS_DIR)/stable/linux-dmabuf/linux-dmabuf-v1.xml
+linux-drm-syncobj-v1-client-protocol.h linux-drm-syncobj-v1-protocol.c: $(WAYLAND_PROTOCOLS_DIR)/staging/linux-drm-syncobj/linux-drm-syncobj-v1.xml
 xdg-shell-client-protocol.h xdg-shell-protocol.c: $(WAYLAND_PROTOCOLS_DIR)/stable/xdg-shell/xdg-shell.xml
 text-input-unstable-v3-client-protocol.h text-input-unstable-v3-protocol.c: $(WAYLAND_PROTOCOLS_DIR)/unstable/text-input/text-input-unstable-v3.xml
 xdg-activation-v1-client-protocol.h xdg-activation-v1-protocol.c: $(WAYLAND_PROTOCOLS_DIR)/staging/xdg-activation/xdg-activation-v1.xml

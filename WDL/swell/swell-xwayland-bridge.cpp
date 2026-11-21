@@ -70,6 +70,9 @@
 #include <unistd.h>
 #include "swell-xwayland-bridge.h"
 #include "swell-wayland.h"
+#ifdef SWELL_WAYLAND_VST3
+#include "swell-vst3-wayland.h"
+#endif
 #include "swell-internal.h"
 #include "../assocarray.h"
 #include "../wdlstring.h"
@@ -2216,6 +2219,7 @@ struct Capture
 
 struct XWaylandBridge
 {
+  struct SWELL_VST3Parent *native = NULL;
   xcb_connection_t *connection = NULL;
   xcb_window_t parent = 0;
   xcb_atom_t monitor = XCB_NONE;
@@ -3636,8 +3640,7 @@ static void place_container(xcb_connection_t *connection, xcb_window_t container
 static bool try_create_plugin(HWND hwnd)
 {
   XWaylandBridge *bridge = g_bridges.Get(hwnd);
-  if (!bridge) return true;
-  if (bridge->external_gl) return true;
+  if (!bridge || bridge->native || bridge->external_gl) return true;
   if (!bridge->placed)
   {
     xw_size(hwnd);
@@ -4313,6 +4316,9 @@ void init_private_xwayland()
 
 static void detach_view(XWaylandBridge *bridge)
 {
+#ifdef SWELL_WAYLAND_VST3
+  if (bridge->native) swell_vst3_position(bridge->native, NULL);
+#endif
   Capture *c = bridge->cap;
   if (c)
   {
@@ -4333,16 +4339,21 @@ static void detach_view(XWaylandBridge *bridge)
     }
     xcb_flush(c->connection);
   }
-  if (bridge->view) swell_wayland_view_destroy(bridge->view);
+  SWELL_WaylandView *view = bridge->view;
   bridge->view = NULL;
   bridge->placed = false;
   if (c) c->view = NULL;
+  if (view) swell_wayland_view_destroy(view);
 }
 
 static void xw_destroy(HWND hwnd)
 {
   XWaylandBridge *bridge = g_bridges.Get(hwnd);
   if (!bridge) return;
+#ifdef SWELL_WAYLAND_VST3
+  swell_vst3_destroy_parent(bridge->native);
+  bridge->native = NULL;
+#endif
   g_source_destroy(bridge->event_source);
   g_source_unref(bridge->event_source);
   KillTimer(hwnd, 1);
@@ -4385,6 +4396,13 @@ static void xw_size(HWND hwnd)
 {
   XWaylandBridge *bridge = g_bridges.Get(hwnd);
   if (!bridge) return;
+#ifdef SWELL_WAYLAND_VST3
+  if (bridge->native)
+  {
+    swell_vst3_position(bridge->native, hwnd);
+    return;
+  }
+#endif
   if (bridge->external_gl) return;
   if (!IsWindowVisible(hwnd))
   {
@@ -4734,6 +4752,43 @@ HWND xw_bridge_create(HWND parent, void **wref, const RECT *rect, const char *br
   return hwnd;
 }
 
+#ifdef SWELL_WAYLAND_VST3
+HWND swell_vst3_find_parent(void *xid)
+{
+  for (const auto &entry : g_bridges)
+    if (entry.val->parent == (uintptr_t)xid && !entry.val->native && !entry.val->cap && !entry.val->external_gl)
+    {
+      HWND hwnd = entry.key;
+      XWaylandBridge *bridge = entry.val;
+      bridge->native = swell_vst3_create_parent();
+      if (!bridge->native) return NULL;
+      hwnd->Retain();
+      KillTimer(hwnd, 1);
+      detach_view(bridge);
+      if (!hwnd->m_hashaddestroy) xw_size(hwnd);
+      const bool valid = !hwnd->m_hashaddestroy && g_bridges.Get(hwnd) == bridge;
+      hwnd->Release();
+      return valid ? hwnd : NULL;
+    }
+  return NULL;
+}
+
+void swell_vst3_unbind(HWND hwnd)
+{
+  XWaylandBridge *bridge = g_bridges.Get(hwnd);
+  if (!bridge || !bridge->native) return;
+  swell_vst3_destroy_parent(bridge->native);
+  bridge->native = NULL;
+  if (!hwnd->m_hashaddestroy) SetTimer(hwnd, 1, 100, NULL);
+}
+
+SWELL_VST3Parent *swell_vst3_parent_view(HWND hwnd)
+{
+  XWaylandBridge *bridge = g_bridges.Get(hwnd);
+  return bridge ? bridge->native : NULL;
+}
+#endif
+
 bool xw_bridge_key_wanted_by_host(HWND hwnd, uint32_t code, unsigned state)
 {
   XWaylandBridge *bridge = g_bridges.Get(hwnd);
@@ -4743,7 +4798,7 @@ bool xw_bridge_key_wanted_by_host(HWND hwnd, uint32_t code, unsigned state)
   void *hook = GetProp(hwnd, "SWELL_XBRIDGE_KBHOOK_CHECK");
   HWND parent = hook ? GetParent(hwnd) : NULL;
   if (!parent) return false;
-  if (input_focus_in(bridge->connection, bridge->parent)) return false;
+  if (!bridge->native && input_focus_in(bridge->connection, bridge->parent)) return false;
   hwnd->Retain();
   const bool handled = SendMessage(parent, (UINT)(INT_PTR)hook, code, state) != 0;
   const bool valid = !hwnd->m_hashaddestroy && g_bridges.Get(hwnd) == bridge && GetFocus() == hwnd;

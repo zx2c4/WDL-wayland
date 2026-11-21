@@ -1078,6 +1078,9 @@ typedef struct
   BOOL (*dllMain)(HINSTANCE, DWORD, LPVOID);
 #endif
   void *lastSymbolRequested;
+#ifdef SWELL_WAYLAND_VST3
+  struct SWELL_VST3Factory *vst3_factory;
+#endif
 } SWELL_HINSTANCE;
 
 

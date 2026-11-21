@@ -61,6 +61,9 @@
 #include "swell-internal.h"
 #include "swell-dlggen.h"
 #include "swell-wayland.h"
+#ifdef SWELL_WAYLAND_VST3
+#include "swell-vst3-wayland.h"
+#endif
 #include "swell-platform.h"
 #include "swell-xwayland-bridge.h"
 #include "../assocarray.h"
@@ -115,6 +118,9 @@ static wl_touch *touch;
 static int touch_id = -1;
 static SWELL_WaylandWindow *touch_window, *click_window;
 static SWELL_WaylandWindow *pointer_window, *keyboard_window, *button_window;
+#ifdef SWELL_WAYLAND_VST3
+static wl_surface *foreign_pointer_surface;
+#endif
 static uint32_t input_serial, popup_serial, button_serial;
 static unsigned modifiers;
 static double pointer_x, pointer_y;
@@ -1333,6 +1339,116 @@ static xdg_surface *role_surface(SWELL_WaylandWindow *w)
   return w ? (w->frame ? libdecor_frame_get_xdg_surface(w->frame) : w->xdg) : NULL;
 }
 
+#ifdef SWELL_WAYLAND_VST3
+wl_display *swell_vst3_display()
+{
+  cancel_read();
+  return disconnected ? NULL : display;
+}
+
+struct SWELL_VST3Parent
+{
+  wl_surface *surface;
+  SWELL_WaylandBuffer *buffer;
+  wl_subsurface *subsurface = NULL;
+  SWELL_WaylandWindow *top = NULL;
+  int x = 0, y = 0;
+};
+
+int swell_vst3_scale()
+{
+  return layout_scale;
+}
+
+SWELL_VST3Parent *swell_vst3_create_parent()
+{
+  if (!subcompositor || !compositor || !shm) return NULL;
+  SWELL_WaylandWindow temporary;
+  temporary.alpha = true;
+  SWELL_WaylandBuffer *buffer = create_buffer(&temporary);
+  if (!buffer) return NULL;
+  buffer->owner = NULL;
+  wl_surface *surface = wl_compositor_create_surface(compositor);
+  wl_region *empty = surface ? wl_compositor_create_region(compositor) : NULL;
+  if (!empty)
+  {
+    if (surface) wl_surface_destroy(surface);
+    delete buffer;
+    return NULL;
+  }
+  wl_surface_set_input_region(surface, empty);
+  wl_region_destroy(empty);
+  return new SWELL_VST3Parent{surface, buffer};
+}
+
+void swell_vst3_position(SWELL_VST3Parent *view, HWND hwnd)
+{
+  SWELL_WaylandWindow *top = hwnd && IsWindowVisible(hwnd) ? window_from_hwnd(hwnd) : NULL;
+  if (top && (top->dead || top->destroying)) top = NULL;
+  POINT point = {};
+  if (top)
+  {
+    SWELL_WaylandHWNDGuard guard(hwnd);
+    ClientToScreen(hwnd, &point);
+    if (!guard.valid() || swell_vst3_parent_view(hwnd) != view || window_from_hwnd(hwnd) != top) return;
+  }
+  const bool changed = top != view->top;
+  if (changed)
+  {
+    if (view->subsurface) wl_subsurface_destroy(view->subsurface);
+    view->subsurface = NULL;
+    view->top = top;
+    if (!top) return;
+    view->subsurface = wl_subcompositor_get_subsurface(subcompositor, view->surface, top->surface);
+    if (!view->subsurface)
+    {
+      view->top = NULL;
+      return;
+    }
+    wl_subsurface_set_desync(view->subsurface);
+    wl_surface_attach(view->surface, view->buffer->object, 0, 0);
+    wl_surface_damage(view->surface, 0, 0, 1, 1);
+  }
+  if (!top) return;
+  const POINT origin = window_origin(top);
+  const int x = floor_scale(point.x - origin.x, top->scale), y = floor_scale(point.y - origin.y, top->scale);
+  if (changed || x != view->x || y != view->y)
+  {
+    view->x = x;
+    view->y = y;
+    wl_subsurface_set_position(view->subsurface, x, y);
+    wl_surface_commit(view->surface);
+    commit_parent(top);
+  }
+}
+
+void swell_vst3_destroy_parent(SWELL_VST3Parent *view)
+{
+  if (!view) return;
+  swell_wayland_client_forget((wl_proxy *)view->surface);
+  if (view->subsurface) wl_subsurface_destroy(view->subsurface);
+  wl_surface_destroy(view->surface);
+  delete view->buffer;
+  delete view;
+}
+
+wl_proxy *swell_vst3_parent(SWELL_VST3Parent *view, const wl_interface *type, RECT *rect)
+{
+  if (!view) return NULL;
+  if (type == &wl_surface_interface) return (wl_proxy *)view->surface;
+  SWELL_WaylandWindow *w = view->top;
+  if (!w) return NULL;
+  if (rect)
+  {
+    int x = 0, y = 0;
+    if (w->frame) libdecor_frame_translate_coordinate(w->frame, 0, 0, &x, &y);
+    *rect = {-x - view->x, -y - view->y, w->width - view->x, w->height - view->y};
+  }
+  if (type == &xdg_surface_interface) return (wl_proxy *)role_surface(w);
+  return w->frame ? (wl_proxy *)libdecor_frame_get_xdg_toplevel(w->frame) : NULL;
+}
+#endif
+
 static xdg_positioner *popup_positioner(SWELL_WaylandWindow *w)
 {
   RECT anchor = {w->x, w->y, w->x, w->y};
@@ -1517,6 +1633,11 @@ static void destroy_native(SWELL_WaylandWindow *w)
   }
   forget_gl_window(w);
   reset_gl(w);
+#ifdef SWELL_WAYLAND_VST3
+  swell_wayland_client_forget((wl_proxy *)w->surface);
+  swell_wayland_client_forget((wl_proxy *)role_surface(w));
+  if (w->frame) swell_wayland_client_forget((wl_proxy *)libdecor_frame_get_xdg_toplevel(w->frame));
+#endif
   w->dead = true;
   w->mapped = false;
   retire_buffers(w);
@@ -2024,12 +2145,17 @@ static void pointer_button(SWELL_WaylandWindow *w, double x, double y, uint32_t 
 }
 
 static void pointer_enter_cb(
-    void *, wl_pointer *, uint32_t serial, wl_surface *surface, wl_fixed_t x, wl_fixed_t y)
+    void *, wl_pointer *p, uint32_t serial, wl_surface *surface, wl_fixed_t x, wl_fixed_t y)
 {
   SWELL_WaylandWindowGuard target(window_from_surface(surface));
   flush_pointer_motion();
+  if (p != pointer) return;
   pointer_window = target.valid() ? target.window : NULL;
   pointer_serial = serial;
+#ifdef SWELL_WAYLAND_VST3
+  foreign_pointer_surface = pointer_window ? NULL : surface;
+  if (foreign_pointer_surface) swell_wayland_client_pointer_enter(surface, seat_name, serial);
+#endif
   if (!pointer_window) return;
   pointer_x = pointer_window->pixel_coordinate(x);
   pointer_y = pointer_window->pixel_coordinate(y);
@@ -2042,6 +2168,9 @@ static void pointer_enter_cb(
 
 static void pointer_leave_cb(void *, wl_pointer *, uint32_t, wl_surface *surface)
 {
+#ifdef SWELL_WAYLAND_VST3
+  foreign_pointer_surface = NULL;
+#endif
   SWELL_WaylandWindowGuard target(window_from_surface(surface));
   flush_pointer_motion();
   SWELL_WaylandWindow *w = target.valid() ? target.window : NULL;
@@ -2079,6 +2208,10 @@ static void pointer_button_cb(
     void *, wl_pointer *, uint32_t serial, uint32_t time, uint32_t button, uint32_t state)
 {
   flush_pointer_motion();
+#ifdef SWELL_WAYLAND_VST3
+  if (foreign_pointer_surface && state == WL_POINTER_BUTTON_STATE_PRESSED)
+    if (HWND hwnd = swell_wayland_client_window(foreign_pointer_surface)) SetFocus(hwnd);
+#endif
   double x = pointer_x, y = pointer_y;
   SWELL_WaylandWindow *w = pointer_target(pointer_window, x, y);
   pointer_button(w, x, y, serial, time, button, state);
@@ -2255,6 +2388,10 @@ static void touch_down_cb(void *, wl_touch *, uint32_t serial, uint32_t time, wl
 {
   if (touch_id >= 0) return;
   touch_window = window_from_surface(surface);
+#ifdef SWELL_WAYLAND_VST3
+  if (!touch_window)
+    if (HWND hwnd = swell_wayland_client_window(surface)) SetFocus(hwnd);
+#endif
   if (!touch_window) return;
   touch_id = id;
   touch_x = touch_window->pixel_coordinate(x);
@@ -2321,6 +2458,9 @@ static void seat_capabilities_cb(void *, wl_seat *s, uint32_t capabilities)
     if (pointer_window) pointer_window->wheel[0] = pointer_window->wheel[1] = 0;
     if (cursor_window == pointer_window) cursor_window = NULL;
     pointer_window = NULL;
+#ifdef SWELL_WAYLAND_VST3
+    foreign_pointer_surface = NULL;
+#endif
     mouse_buttons = 0;
     pointer_serial = 0;
     click_window = NULL;
@@ -2439,23 +2579,8 @@ static const struct { const char *name; uint32_t shape; } cursor_shapes[] = {
   {"bottom_right_corner", WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SE_RESIZE}
 };
 
-static void update_cursor()
+static void set_pointer_cursor(SWELL_WaylandCursor *cursor, int window_scale, bool dragging)
 {
-  const bool dragging = transfer_drag_active();
-  SWELL_WaylandWindow *window = pointer_window ? pointer_window :
-    dragging ? button_window : NULL;
-  if (!pointer || !window || !pointer_serial) return;
-  if (cursor_visible < 0)
-  {
-    wl_pointer_set_cursor(pointer, pointer_serial, NULL, 0, 0);
-    return;
-  }
-  SWELL_WaylandCursor *cursor = (SWELL_WaylandCursor *)current_cursor;
-  if (!dragging && window->is_view)
-  {
-    SWELL_WaylandCursor *view_cursor = &((SWELL_WaylandView *)window)->cursor;
-    if (view_cursor->buffer || view_cursor->name.GetLength()) cursor = view_cursor;
-  }
   if (!cursor && !dragging)
   {
     wl_pointer_set_cursor(pointer, pointer_serial, NULL, 0, 0);
@@ -2468,9 +2593,7 @@ static void update_cursor()
         cursor_device, pointer_serial, cursor->shape);
     return;
   }
-  SWELL_WaylandOutput *output = view_output(window);
-  const int cursor_scale = output ? output_scale(output) : window->scale;
-  const int scale = (cursor_scale + SWELL_WAYLAND_SCALE_ONE - 1) / SWELL_WAYLAND_SCALE_ONE;
+  const int scale = (window_scale + SWELL_WAYLAND_SCALE_ONE - 1) / SWELL_WAYLAND_SCALE_ONE;
   if (!cursor_surface) cursor_surface = wl_compositor_create_surface(compositor);
   wl_buffer *buffer = NULL;
   int hotspot_x = 0, hotspot_y = 0, width = 0, height = 0, buffer_scale = scale;
@@ -2540,6 +2663,33 @@ static void update_cursor()
   wl_surface_damage_buffer(cursor_surface, 0, 0, width, height);
   wl_surface_commit(cursor_surface);
 }
+
+static void update_cursor()
+{
+  const bool dragging = transfer_drag_active();
+  SWELL_WaylandWindow *window = pointer_window ? pointer_window :
+    dragging ? button_window : NULL;
+  if (!pointer || !window || !pointer_serial) return;
+  SWELL_WaylandCursor *cursor = (SWELL_WaylandCursor *)current_cursor;
+  if (!dragging && window->is_view)
+  {
+    SWELL_WaylandCursor *view_cursor = &((SWELL_WaylandView *)window)->cursor;
+    if (view_cursor->buffer || view_cursor->name.GetLength()) cursor = view_cursor;
+  }
+  SWELL_WaylandOutput *output = view_output(window);
+  const int scale = output ? output_scale(output) : window->scale;
+  if (cursor_visible < 0) set_pointer_cursor(NULL, scale, false);
+  else set_pointer_cursor(cursor, scale, dragging);
+}
+
+#ifdef SWELL_WAYLAND_VST3
+void swell_vst3_default_cursor(HWND hwnd)
+{
+  SWELL_WaylandWindow *w = window_from_hwnd(hwnd);
+  set_pointer_cursor((SWELL_WaylandCursor *)LoadCursor(NULL, IDC_ARROW),
+      w ? w->scale : layout_scale, false);
+}
+#endif
 
 bool swell_wayland_view_has_pointer(SWELL_WaylandView *view, POINT *point)
 {
